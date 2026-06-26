@@ -91,22 +91,17 @@ export default function GraphCanvas({
       }
     });
 
-    g.d3ReheatSimulation();
-  }, [data.nodes.length]);
-
-  // ── Idle motion — gentle periodic nudge so the graph never fully freezes ───
-  useEffect(() => {
-    if (!graphRef.current) return;
-    const id = setInterval(() => {
-      const g = graphRef.current;
-      if (!g) return;
-      g.d3Force('charge')?.distanceMax?.(260); // keep distanceMax across reheats
-      g.d3AlphaTarget?.(0.005);
-      g.d3ReheatSimulation();
-      setTimeout(() => g.d3AlphaTarget?.(0), 1200); // let it settle back down
+    // Idle motion: gentle nudge every 8 s so the graph never fully freezes.
+    // Piggybacked here (same dep) so graphRef.current is guaranteed non-null.
+    const idleId = setInterval(() => {
+      if (!graphRef.current) return;
+      graphRef.current.d3ReheatSimulation();
     }, 8000);
-    return () => clearInterval(id);
-  }, []);
+
+    g.d3ReheatSimulation();
+
+    return () => clearInterval(idleId);
+  }, [data.nodes.length]);
 
   // ── Camera focus ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -170,6 +165,9 @@ export default function GraphCanvas({
   // ── Node canvas ─────────────────────────────────────────────────────────────
   // useCallback([]) = stable reference = ForceGraph2D's loop never resets
   const nodeCanvasObject = useCallback((node: any, ctx: CanvasRenderingContext2D, scale: number) => {
+    // d3 positions nodes after first tick — skip until coordinates are valid
+    if (node.x == null || !isFinite(node.x) || node.y == null || !isFinite(node.y)) return;
+
     const { hoveredNode, selectedNode, highlightedNodeIds, activePath, hlNodes } = stateRef.current;
     const role: NodeRole = node.role ?? 'normal';
     const cfg = ROLE[role] ?? ROLE.normal;
@@ -353,6 +351,7 @@ export default function GraphCanvas({
   // Pointer hit area is 1.8× the visual radius so the full node body (and a
   // comfortable margin) triggers hover/click, not just the very center.
   const nodePointerAreaPaint = useCallback((node: any, color: string, ctx: CanvasRenderingContext2D) => {
+    if (node.x == null || !isFinite(node.x) || node.y == null || !isFinite(node.y)) return;
     const r = nodeR(node) * 1.8;
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
