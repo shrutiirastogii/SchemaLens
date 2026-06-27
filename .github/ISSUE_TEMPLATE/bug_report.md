@@ -19,6 +19,7 @@ What you expected to happen.
 
 ### Environment
 - OS:
+- Browser:
 - Python version:
 - Node version:
 - Database:
