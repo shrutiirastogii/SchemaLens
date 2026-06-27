@@ -70,37 +70,32 @@ export default function GraphCanvas({
     if (!graphRef.current || data.nodes.length === 0) return;
     const g = graphRef.current;
 
-    // Isolated nodes generate almost no charge; distanceMax caps how far
-    // connected-node repulsion can reach so isolated nodes aren't launched away.
     const chargeForce = g.d3Force('charge') as any;
     if (chargeForce) {
-      chargeForce.strength((node: any) => node.role === 'isolated' ? -8 : -250);
-      if (typeof chargeForce.distanceMax === 'function') chargeForce.distanceMax(260);
+      // Isolated nodes need enough charge to repel each other; distanceMax
+      // raised so connected nodes push isolated ones outward too.
+      chargeForce.strength((node: any) => node.role === 'isolated' ? -80 : -250);
+      if (typeof chargeForce.distanceMax === 'function') chargeForce.distanceMax(400);
     }
     g.d3Force('link')?.distance(110).strength(0.5);
 
-    // Isolated nodes have no edges. This explicit gravity pulls them toward
-    // the cluster center — strength 0.08 scales with distance. Dead-zone < 30px
-    // prevents micro-jitter once nodes settle near the origin.
-    g.d3Force('isolatedGravity', () => {
+    // Keep isolated nodes on a ring at ~350px from the origin so they form a
+    // clean perimeter instead of colliding in the middle of the main cluster.
+    const TARGET_R = 350;
+    g.d3Force('isolatedRing', () => {
       for (const node of graphDataRef.current.nodes) {
         if (node.role !== 'isolated' || node.x == null) continue;
-        if (Math.hypot(node.x, node.y) < 30) continue;
-        node.vx = (node.vx ?? 0) - node.x * 0.08;
-        node.vy = (node.vy ?? 0) - node.y * 0.08;
+        const dist = Math.hypot(node.x, node.y);
+        if (dist < 1) continue;
+        const factor = 0.05 * (dist - TARGET_R) / dist;
+        node.vx = (node.vx ?? 0) - node.x * factor;
+        node.vy = (node.vy ?? 0) - node.y * factor;
       }
     });
 
-    // Idle motion: gentle nudge every 8 s so the graph never fully freezes.
-    // Piggybacked here (same dep) so graphRef.current is guaranteed non-null.
-    const idleId = setInterval(() => {
-      if (!graphRef.current) return;
-      graphRef.current.d3ReheatSimulation();
-    }, 8000);
-
+    // Canvas keeps rendering every frame (cooldownTicks=Infinity) for pulse/
+    // ripple animations — no periodic reheat needed; D3 sim settles via alpha decay.
     g.d3ReheatSimulation();
-
-    return () => clearInterval(idleId);
   }, [data.nodes.length]);
 
   // ── Camera focus ───────────────────────────────────────────────────────────
@@ -369,8 +364,8 @@ export default function GraphCanvas({
         if (n.role === 'isolated') {
           const idx = isolatedNodes.indexOf(n);
           const angle = (idx / Math.max(1, isolatedNodes.length)) * Math.PI * 2;
-          node.x = Math.cos(angle) * 60;
-          node.y = Math.sin(angle) * 60;
+          node.x = Math.cos(angle) * 380;
+          node.y = Math.sin(angle) * 380;
         }
         return node;
       }),
@@ -396,12 +391,14 @@ export default function GraphCanvas({
         onNodeHover={handleHoverStable}
         onNodeClick={handleClickStable}
         nodeLabel={nodeLabelCallback}
-        // cooldownTicks=Infinity: canvas renders every frame forever.
-        // This is required for hub pulse and ripple animations.
-        // Never use 0 — that stops the simulation after 0 ticks, breaking drag.
+        // autoPauseRedraw=false: the rAF loop always calls doRedraw, even after
+        // the engine cooldown stops. Without this, hub pulse and ripple freeze
+        // once cooldownTime (15 s default) expires — canvas redraws only when
+        // isEngineRunning() is true, and that becomes false after the cooldown.
+        autoPauseRedraw={false}
         cooldownTicks={Infinity}
         d3AlphaDecay={0.022}
-        d3VelocityDecay={0.3}
+        d3VelocityDecay={0.4}
         enableNodeDrag
         enableZoomInteraction
         enablePanInteraction
